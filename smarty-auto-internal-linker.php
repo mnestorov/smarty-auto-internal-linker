@@ -20,7 +20,7 @@ if (!defined('WPINC')) {
  * Constants
  * ---------------------------------------------------------------------- */
 
-define('SMARTY_AUL_TABLE', 'cail_keywords');
+define('SMARTY_AUL_TABLE', 'smarty_dictionary_keywords');
 define('SMARTY_AUL_CACHE_KEY', 'smarty_aul_dictionary_cache');
 define('SMARTY_AUL_CACHE_TTL', DAY_IN_SECONDS);
 define('SMARTY_AUL_MAX_LINKS_PER_POST', 3);
