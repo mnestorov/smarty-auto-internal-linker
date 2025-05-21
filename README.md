@@ -1,0 +1,1 @@
+# smarty-auto-internal-linker
