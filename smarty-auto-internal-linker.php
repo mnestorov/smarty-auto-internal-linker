@@ -20,7 +20,7 @@ if ( ! defined( 'WPINC' ) ) {
  * Constants
  * ---------------------------------------------------------------------- */
 
-define( 'SMARTY_AUL_TABLE',               'smarty_dictionary_keywords' );
+define( 'SMARTY_AUL_TABLE',               'smarty_aul_dictionary_keywords' );
 define( 'SMARTY_AUL_CACHE_KEY',           'smarty_aul_dictionary_cache' );
 define( 'SMARTY_AUL_CACHE_TTL',           DAY_IN_SECONDS );
 define( 'SMARTY_AUL_MAX_LINKS_PER_POST',  3 );
@@ -112,7 +112,7 @@ if ( ! function_exists( 'smarty_aul_get_keyword_by_id' ) ) {
 	/**
 	 * Fetches one keyword row by ID.
 	 *
-	 * @since 1.2.0
+	 * @since 1.0.0
 	 * @param int $id Row ID.
 	 * @return object|null
 	 */
@@ -181,7 +181,7 @@ if ( ! function_exists( 'smarty_aul_enqueue_assets' ) ) {
 	/**
 	 * Injects a tiny inline stylesheet that makes auto-links bold.
 	 *
-	 * @since 1.2.1
+	 * @since 1.0.0
 	 * @return void
 	 */
 	function smarty_aul_enqueue_assets() {
@@ -200,7 +200,7 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 	/**
 	 * Inserts automatic internal links into post content (case-insensitive).
 	 *
-	 * @since 1.2.2
+	 * @since 1.0.0
 	 * @param string $content Original HTML.
 	 * @return string Modified HTML with links.
 	 */
@@ -342,7 +342,7 @@ if ( ! function_exists( 'smarty_aul_admin_notice' ) ) {
 	/**
 	 * Displays an admin-notice message once.
 	 *
-	 * @since 1.2.1
+	 * @since 1.0.0
 	 * @param string $msg  Message text.
 	 * @param string $type notice-info|notice-success|notice-error|notice-warning.
 	 * @return void
@@ -370,22 +370,22 @@ if ( ! function_exists( 'smarty_aul_register_admin_menu' ) ) {
 			__( 'Auto Internal Links', 'smarty-auto-internal-linker' ),
 			__( 'Auto Links',         'smarty-auto-internal-linker' ),
 			'manage_options',
-			'smarty_aul_admin',
-			'smarty_aul_admin_page',
+			'smarty_aul_settings',
+			'smarty_aul_settings_page',
 			'dashicons-admin-links'
 		);
 	}
 }
 add_action( 'admin_menu', 'smarty_aul_register_admin_menu' );
 
-if ( ! function_exists( 'smarty_aul_admin_page' ) ) {
+if ( ! function_exists( 'smarty_aul_settings_page' ) ) {
 	/**
 	 * Renders the settings screen.
 	 *
 	 * @since 1.0.0
 	 * @return void
 	 */
-	function smarty_aul_admin_page() {
+	function smarty_aul_settings_page() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
@@ -430,7 +430,7 @@ if ( ! function_exists( 'smarty_aul_admin_page' ) ) {
 				);
 			} else {
 				/* Success → redirect to avoid resubmission */
-				$redirect = admin_url( 'admin.php?page=smarty_aul_admin' );
+				$redirect = admin_url( 'admin.php?page=smarty_aul_settings' );
 				if ( ! headers_sent() ) {
 					wp_safe_redirect( $redirect );
 					exit;
@@ -515,7 +515,7 @@ if ( ! function_exists( 'smarty_aul_admin_page' ) ) {
 						: __( 'Save Keyword',   'smarty-auto-internal-linker' )
 				);
 				if ( $editing ) {
-					echo '&nbsp;<a href="' . esc_url( admin_url( 'admin.php?page=smarty_aul_admin' ) ) . '" class="button-secondary">' . esc_html__( 'Cancel', 'smarty-auto-internal-linker' ) . '</a>';
+					echo '&nbsp;<a href="' . esc_url( admin_url( 'admin.php?page=smarty_aul_settings' ) ) . '" class="button-secondary">' . esc_html__( 'Cancel', 'smarty-auto-internal-linker' ) . '</a>';
 				}
 				?>
 			</form>
@@ -545,7 +545,7 @@ if ( ! function_exists( 'smarty_aul_admin_page' ) ) {
 							<td><?php echo (int) $kw->max_per_post; ?></td>
 							<td><?php echo esc_html( $kw->rel_attribute ); ?></td>
 							<td style="white-space:nowrap;">
-								<a href="<?php echo esc_url( admin_url( 'admin.php?page=smarty_aul_admin&edit=' . $kw->id ) ); ?>" class="button">
+								<a href="<?php echo esc_url( admin_url( 'admin.php?page=smarty_aul_settings&edit=' . $kw->id ) ); ?>" class="button">
 									<?php esc_html_e( 'Edit', 'smarty-auto-internal-linker' ); ?>
 								</a>
 
