@@ -453,7 +453,7 @@ if ( ! function_exists( 'smarty_aul_settings_page' ) ) {
 
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'Automatic Internal Linking – Settings', 'smarty-auto-internal-linker' ); ?></h1>
+			<h1><?php esc_html_e( 'Automatic Internal Linking | Settings', 'smarty-auto-internal-linker' ); ?></h1>
 
 			<h2>
 				<?php
