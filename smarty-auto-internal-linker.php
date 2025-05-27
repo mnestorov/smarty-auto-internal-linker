@@ -24,6 +24,7 @@ define( 'SMARTY_AUL_TABLE',               'smarty_aul_dictionary_keywords' );
 define( 'SMARTY_AUL_CACHE_KEY',           'smarty_aul_dictionary_cache' );
 define( 'SMARTY_AUL_CACHE_TTL',           DAY_IN_SECONDS );
 define( 'SMARTY_AUL_MAX_LINKS_PER_POST',  3 );
+define( 'SMARTY_AUL_PER_PAGE', 20 ); 
 define( 'SMARTY_AUL_CRON_HOOK',           'smarty_aul_linking_old_posts' );
 define( 'SMARTY_AUL_VERSION',             '1.2.1' );
 
@@ -171,6 +172,35 @@ if ( ! function_exists( 'smarty_aul_has_disallowed_ancestor' ) ) {
 		}
 		return false;
 	}
+}
+
+if (!function_exists('smarty_aul_enqueue_admin_scripts')) {
+    /**
+     * Enqueue admin-specific styles and scripts for the City Autocomplete plugin.
+     *
+     * This function enqueues the admin CSS and JS files only for admin pages.
+     * It also localizes the JS script with nonce and AJAX URL.
+     *
+     * @since 1.0.0
+     *
+     * @param string $hook The current admin page hook suffix.
+     * @return void
+     */
+    function smarty_aul_enqueue_admin_scripts($hook) {
+     
+        wp_enqueue_style('smarty-aul-admin-css', plugin_dir_url(__FILE__) . 'css/smarty-aul-admin.css', array(), '1.0.0');
+        wp_enqueue_script('smarty-aul-admin-js', plugin_dir_url(__FILE__) . 'js/smarty-aul-admin.js', array('jquery'), '1.0.0', true);
+
+        wp_localize_script(
+            'smarty-aul-admin-js',
+            'smartyAutoInternalLinker',
+            [
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'nonce'   => wp_create_nonce('smarty_aul_nonce'),
+            ]
+        );
+    }
+    add_action('admin_enqueue_scripts', 'smarty_aul_enqueue_admin_scripts');
 }
 
 /* -------------------------------------------------------------------------
@@ -449,126 +479,251 @@ if ( ! function_exists( 'smarty_aul_settings_page' ) ) {
 			$editing     = (bool) $edit_record;
 		}
 
-		$keywords = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY id DESC" );
+		/* ---------- Pagination setup ---------- */
+		$per_page = SMARTY_AUL_PER_PAGE;
+		$paged    = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1;
+		$offset   = ( $paged - 1 ) * $per_page;
+
+		$total_items = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		$total_pages = max( 1, ceil( $total_items / $per_page ) );
+
+		$keywords = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} ORDER BY id DESC LIMIT %d OFFSET %d",
+				$per_page,
+				$offset
+			)
+		);
 
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Automatic Internal Linking | Settings', 'smarty-auto-internal-linker' ); ?></h1>
+			<div id="smarty-aul-settings-container">
+				<div>
+					<h2>
+						<?php
+						echo $editing
+							? esc_html__( 'Edit Keyword', 'smarty-auto-internal-linker' )
+							: esc_html__( 'Add Keyword',  'smarty-auto-internal-linker' );
+						?>
+					</h2>
 
-			<h2>
-				<?php
-				echo $editing
-					? esc_html__( 'Edit Keyword', 'smarty-auto-internal-linker' )
-					: esc_html__( 'Add Keyword',  'smarty-auto-internal-linker' );
-				?>
-			</h2>
+					<form id="smarty-aul-form" method="post">
+						<?php wp_nonce_field( 'smarty_aul_nonce' ); ?>
+						<input type="hidden" name="smarty_aul_action" value="<?php echo $editing ? 'update' : 'add'; ?>">
+						<?php if ( $editing ) : ?>
+							<input type="hidden" name="id" value="<?php echo (int) $edit_record->id; ?>">
+						<?php endif; ?>
 
-			<form method="post">
-				<?php wp_nonce_field( 'smarty_aul_nonce' ); ?>
-				<input type="hidden" name="smarty_aul_action" value="<?php echo $editing ? 'update' : 'add'; ?>">
-				<?php if ( $editing ) : ?>
-					<input type="hidden" name="id" value="<?php echo (int) $edit_record->id; ?>">
-				<?php endif; ?>
+						<table class="form-table" role="presentation">
+							<tr>
+								<th scope="row">
+									<label for="keyword"><?php esc_html_e( 'Keyword / Phrase', 'smarty-auto-internal-linker' ); ?></label>
+								</th>
+								<td>
+									<input name="keyword" type="text" id="keyword" value="<?php echo esc_attr( $editing ? $edit_record->keyword : '' ); ?>" class="regular-text" required>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row">
+									<label for="target_url"><?php esc_html_e( 'Target URL', 'smarty-auto-internal-linker' ); ?></label>
+								</th>
+								<td>
+									<input name="target_url" type="url" id="target_url" value="<?php echo esc_url( $editing ? $edit_record->target_url : '' ); ?>" class="regular-text" required>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row">
+									<label for="max_per_post"><?php esc_html_e( 'Max links per post', 'smarty-auto-internal-linker' ); ?></label>
+								</th>
+								<td>
+									<input name="max_per_post" type="number" id="max_per_post" min="1" max="3" value="<?php echo esc_attr( $editing ? (int) $edit_record->max_per_post : 1 ); ?>" required>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row">
+									<label for="rel_attribute"><?php esc_html_e( 'Rel attribute', 'smarty-auto-internal-linker' ); ?></label>
+								</th>
+								<td>
+									<select name="rel_attribute" id="rel_attribute">
+										<option value="dofollow" <?php selected( $editing ? $edit_record->rel_attribute : 'dofollow', 'dofollow' ); ?>>dofollow</option>
+										<option value="nofollow" <?php selected( $editing ? $edit_record->rel_attribute : '', 'nofollow' ); ?>>nofollow</option>
+									</select>
+								</td>
+							</tr>
+						</table>
 
-				<table class="form-table" role="presentation">
-					<tr>
-						<th scope="row">
-							<label for="keyword"><?php esc_html_e( 'Keyword / Phrase', 'smarty-auto-internal-linker' ); ?></label>
-						</th>
-						<td>
-							<input name="keyword" type="text" id="keyword" value="<?php echo esc_attr( $editing ? $edit_record->keyword : '' ); ?>" class="regular-text" required>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row">
-							<label for="target_url"><?php esc_html_e( 'Target URL', 'smarty-auto-internal-linker' ); ?></label>
-						</th>
-						<td>
-							<input name="target_url" type="url" id="target_url" value="<?php echo esc_url( $editing ? $edit_record->target_url : '' ); ?>" class="regular-text" required>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row">
-							<label for="max_per_post"><?php esc_html_e( 'Max links per post', 'smarty-auto-internal-linker' ); ?></label>
-						</th>
-						<td>
-							<input name="max_per_post" type="number" id="max_per_post" min="1" max="3" value="<?php echo esc_attr( $editing ? (int) $edit_record->max_per_post : 1 ); ?>" required>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row">
-							<label for="rel_attribute"><?php esc_html_e( 'Rel attribute', 'smarty-auto-internal-linker' ); ?></label>
-						</th>
-						<td>
-							<select name="rel_attribute" id="rel_attribute">
-								<option value="dofollow" <?php selected( $editing ? $edit_record->rel_attribute : 'dofollow', 'dofollow' ); ?>>dofollow</option>
-								<option value="nofollow" <?php selected( $editing ? $edit_record->rel_attribute : '', 'nofollow' ); ?>>nofollow</option>
-							</select>
-						</td>
-					</tr>
-				</table>
+						<?php
+						submit_button(
+							$editing
+								? __( 'Update Keyword', 'smarty-auto-internal-linker' )
+								: __( 'Save Keyword',   'smarty-auto-internal-linker' )
+						);
+						if ( $editing ) {
+							echo '&nbsp;<a href="' . esc_url( admin_url( 'admin.php?page=smarty_aul_settings' ) ) . '" class="button-secondary">' . esc_html__( 'Cancel', 'smarty-auto-internal-linker' ) . '</a>';
+						}
+						?>
+					</form>
+					<hr>
+					
+					<h2><?php esc_html_e( 'Existing Keywords', 'smarty-auto-internal-linker' ); ?></h2>
+					<table id="smarty-aul-keywords" class="widefat">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Keyword', 'smarty-auto-internal-linker' ); ?></th>
+								<th><?php esc_html_e( 'Target URL', 'smarty-auto-internal-linker' ); ?></th>
+								<th><?php esc_html_e( 'Max/Post', 'smarty-auto-internal-linker' ); ?></th>
+								<th><?php esc_html_e( 'Rel', 'smarty-auto-internal-linker' ); ?></th>
+								<th><?php esc_html_e( 'Actions', 'smarty-auto-internal-linker' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $keywords as $kw ) : ?>
+								<tr>
+									<td><?php echo esc_html( $kw->keyword ); ?></td>
+									<td>
+										<a href="<?php echo esc_url( $kw->target_url ); ?>" target="_blank" rel="noopener noreferrer">
+											<?php echo esc_url( $kw->target_url ); ?>
+										</a>
+									</td>
+									<td><?php echo (int) $kw->max_per_post; ?></td>
+									<td><?php echo esc_html( $kw->rel_attribute ); ?></td>
+									<td style="white-space:nowrap;">
+										<a href="<?php echo esc_url( admin_url( 'admin.php?page=smarty_aul_settings&edit=' . $kw->id ) ); ?>" class="button">
+											<?php esc_html_e( 'Edit', 'smarty-auto-internal-linker' ); ?>
+										</a>
 
-				<?php
-				submit_button(
-					$editing
-						? __( 'Update Keyword', 'smarty-auto-internal-linker' )
-						: __( 'Save Keyword',   'smarty-auto-internal-linker' )
-				);
-				if ( $editing ) {
-					echo '&nbsp;<a href="' . esc_url( admin_url( 'admin.php?page=smarty_aul_settings' ) ) . '" class="button-secondary">' . esc_html__( 'Cancel', 'smarty-auto-internal-linker' ) . '</a>';
-				}
-				?>
-			</form>
+										<form method="post" style="display:inline;">
+											<?php wp_nonce_field( 'smarty_aul_nonce' ); ?>
+											<input type="hidden" name="smarty_aul_action" value="delete">
+											<input type="hidden" name="id" value="<?php echo (int) $kw->id; ?>">
+											<?php
+											submit_button(
+												__( 'Delete', 'smarty-auto-internal-linker' ),
+												'delete',
+												'',
+												false,
+												[ 'onclick' => 'return confirm("Are you sure?");' ]
+											);
+											?>
+										</form>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
 
-			<hr>
+					<?php
+					/* ---------- Pagination links ---------- */
+					if ( $total_pages > 1 ) :
+						$page_links = paginate_links( [
+							'base'      => add_query_arg( 'paged', '%#%' ),
+							'format'    => '',
+							'prev_text' => '&laquo;',
+							'next_text' => '&raquo;',
+							'total'     => $total_pages,
+							'current'   => $paged,
+							'type'      => 'array',
+						] );
 
-			<h2><?php esc_html_e( 'Existing Keywords', 'smarty-auto-internal-linker' ); ?></h2>
-			<table class="widefat">
-				<thead>
-					<tr>
-						<th><?php esc_html_e( 'Keyword', 'smarty-auto-internal-linker' ); ?></th>
-						<th><?php esc_html_e( 'Target URL', 'smarty-auto-internal-linker' ); ?></th>
-						<th><?php esc_html_e( 'Max/Post', 'smarty-auto-internal-linker' ); ?></th>
-						<th><?php esc_html_e( 'Rel', 'smarty-auto-internal-linker' ); ?></th>
-						<th><?php esc_html_e( 'Actions', 'smarty-auto-internal-linker' ); ?></th>
-					</tr>
-				</thead>
-				<tbody>
-					<?php foreach ( $keywords as $kw ) : ?>
-						<tr>
-							<td><?php echo esc_html( $kw->keyword ); ?></td>
-							<td>
-								<a href="<?php echo esc_url( $kw->target_url ); ?>" target="_blank" rel="noopener noreferrer">
-									<?php echo esc_url( $kw->target_url ); ?>
-								</a>
-							</td>
-							<td><?php echo (int) $kw->max_per_post; ?></td>
-							<td><?php echo esc_html( $kw->rel_attribute ); ?></td>
-							<td style="white-space:nowrap;">
-								<a href="<?php echo esc_url( admin_url( 'admin.php?page=smarty_aul_settings&edit=' . $kw->id ) ); ?>" class="button">
-									<?php esc_html_e( 'Edit', 'smarty-auto-internal-linker' ); ?>
-								</a>
-
-								<form method="post" style="display:inline;">
-									<?php wp_nonce_field( 'smarty_aul_nonce' ); ?>
-									<input type="hidden" name="smarty_aul_action" value="delete">
-									<input type="hidden" name="id" value="<?php echo (int) $kw->id; ?>">
-									<?php
-									submit_button(
-										__( 'Delete', 'smarty-auto-internal-linker' ),
-										'delete',
-										'',
-										false,
-										[ 'onclick' => 'return confirm("Are you sure?");' ]
-									);
-									?>
-								</form>
-							</td>
-						</tr>
-					<?php endforeach; ?>
-				</tbody>
-			</table>
+						if ( $page_links ) :
+							echo '<div id="smarty-aul-pagination"><span class="pagination-links">';
+							echo join( ' ', $page_links );
+							echo '</span></div>';
+						endif;
+					endif;
+					?>
+				</div>
+				<div id="smarty-aul-tabs-container">
+					<div>
+						<h2 class="smarty-aul-nav-tab-wrapper">
+							<a href="#smarty-aul-documentation" class="smarty-aul-nav-tab smarty-aul-nav-tab-active"><?php esc_html_e('Documentation', 'smarty-auto-internal-linker'); ?></a>
+							<a href="#smarty-aul-changelog" class="smarty-aul-nav-tab"><?php esc_html_e('Changelog', 'smarty-auto-internal-linker'); ?></a>
+						</h2>
+						<div id="smarty-aul-documentation" class="smarty-aul-tab-content active">
+							<div class="smarty-aul-view-more-container">
+								<p><?php esc_html_e('Click "View More" to load the plugin documentation.', 'smarty-auto-internal-linker'); ?></p>
+								<button id="smarty-aul-load-readme-btn" class="button button-primary">
+									<?php esc_html_e('View More', 'smarty-auto-internal-linker'); ?>
+								</button>
+							</div>
+							<div id="smarty-aul-readme-content" style="margin-top: 20px;"></div>
+						</div>
+						<div id="smarty-aul-changelog" class="smarty-aul-tab-content">
+							<div class="smarty-aul-view-more-container">
+								<p><?php esc_html_e('Click "View More" to load the plugin changelog.', 'smarty-auto-internal-linker'); ?></p>
+								<button id="smarty-aul-load-changelog-btn" class="button button-primary">
+									<?php esc_html_e('View More', 'smarty-auto-internal-linker'); ?>
+								</button>
+							</div>
+							<div id="smarty-aul-changelog-content" style="margin-top: 20px;"></div>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 		<?php
 	}
 }
+
+if ( ! function_exists('smarty_aul_load_readme' ) ) {
+    /**
+     * AJAX handler to load and parse the README.md content.
+     */
+    function smarty_aul_load_readme() {
+        check_ajax_referer('smarty_aul_nonce', 'nonce');
+    
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have sufficient permissions.');
+        }
+    
+        $readme_path = plugin_dir_path(__FILE__) . 'README.md';
+        if (file_exists($readme_path)) {
+            // Include Parsedown library
+            if (!class_exists('Parsedown')) {
+                require_once plugin_dir_path(__FILE__) . 'libs/Parsedown.php';
+            }
+    
+            $parsedown = new Parsedown();
+            $markdown_content = file_get_contents($readme_path);
+            $html_content = $parsedown->text($markdown_content);
+    
+            // Remove <img> tags from the content
+            $html_content = preg_replace('/<img[^>]*>/', '', $html_content);
+    
+            wp_send_json_success($html_content);
+        } else {
+            wp_send_json_error('README.md file not found.');
+        }
+    }    
+}
+add_action( 'wp_ajax_smarty_aul_load_readme', 'smarty_aul_load_readme' );
+
+if ( ! function_exists( 'smarty_aul_load_changelog' ) ) {
+    /**
+     * AJAX handler to load and parse the CHANGELOG.md content.
+     */
+    function smarty_aul_load_changelog() {
+        check_ajax_referer('smarty_aul_nonce', 'nonce');
+    
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have sufficient permissions.');
+        }
+    
+        $changelog_path = plugin_dir_path(__FILE__) . 'CHANGELOG.md';
+        if (file_exists($changelog_path)) {
+            if (!class_exists('Parsedown')) {
+                require_once plugin_dir_path(__FILE__) . 'libs/Parsedown.php';
+            }
+    
+            $parsedown = new Parsedown();
+            $markdown_content = file_get_contents($changelog_path);
+            $html_content = $parsedown->text($markdown_content);
+    
+            wp_send_json_success($html_content);
+        } else {
+            wp_send_json_error('CHANGELOG.md file not found.');
+        }
+    }
+}
+add_action( 'wp_ajax_smarty_aul_load_changelog', 'smarty_aul_load_changelog' );
