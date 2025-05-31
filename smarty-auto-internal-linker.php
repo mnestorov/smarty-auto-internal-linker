@@ -3,7 +3,7 @@
  * Plugin Name:             SM - Auto Internal Linker
  * Plugin URI:              https://github.com/mnestorov/smarty-auto-internal-linker
  * Description:             Automatically links predefined keywords/phrases in news articles to related posts within the site.
- * Version:                 1.0.0
+ * Version:                 1.0.1
  * Author:                  Martin Nestorov
  * Author URI:              https://github.com/mnestorov
  * License:                 GPL-2.0+
@@ -228,13 +228,15 @@ add_action( 'wp_enqueue_scripts', 'smarty_aul_enqueue_assets' );
 
 if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 	/**
-	 * Inserts automatic internal links into post content (case-insensitive).
+	 * Inserts automatic internal links into post content (case-insensitive),
+	 * but never links a post to itself.
 	 *
 	 * @since 1.0.0
 	 * @param string $content Original HTML.
 	 * @return string Modified HTML with links.
 	 */
 	function smarty_aul_filter_content( $content ) {
+
 		/* Run only on the front end of singular posts/pages */
 		if ( is_admin() || ! is_singular() ) {
 			return $content;
@@ -245,6 +247,33 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 			return $content;
 		}
 
+		/* ---------- Exclude self-links ---------- */
+		$current_abs = trailingslashit(
+			strtolower( untrailingslashit( get_permalink() ) )
+		);
+		$current_rel = trailingslashit(
+			strtolower( untrailingslashit( wp_make_link_relative( $current_abs ) ) )
+		);
+
+		/* Remove any keyword whose target URL == this post */
+		foreach ( $dictionary as $kw => $meta ) {
+			$target_abs = trailingslashit(
+				strtolower( untrailingslashit( $meta['url'] ) )
+			);
+			$target_rel = trailingslashit(
+				strtolower( untrailingslashit( wp_make_link_relative( $meta['url'] ) ) )
+			);
+
+			if ( $target_abs === $current_abs || $target_rel === $current_rel ) {
+				unset( $dictionary[ $kw ] );
+			}
+		}
+
+		if ( empty( $dictionary ) ) {      // after filtering
+			return $content;
+		}
+
+		/* ---------- DOM parsing & linking ---------- */
 		libxml_use_internal_errors( true );
 		$dom = new DOMDocument();
 		$dom->loadHTML(
@@ -256,9 +285,8 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 		$text_nodes = $xpath->query( '//text()' );
 
 		$links_added = 0;
-		$per_word    = [];                                           // counts per keyword (lower-case)
-		$skip_tags   = [ 'a', 'blockquote', 'h1', 'h2', 'h3',
-						 'h4', 'h5', 'h6' ];
+		$per_word    = [];                                   // counts per keyword (lower-case)
+		$skip_tags   = [ 'a', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6' ];
 
 		foreach ( $text_nodes as $text_node ) {
 			if ( smarty_aul_has_disallowed_ancestor( $text_node, $skip_tags ) ) {
@@ -268,7 +296,6 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 			$node_content = $text_node->nodeValue;
 
 			foreach ( $dictionary as $keyword => $data ) {
-
 				/* Global cap reached? */
 				if ( $links_added >= SMARTY_AUL_MAX_LINKS_PER_POST ) {
 					break 2;
@@ -277,8 +304,8 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 				/* Per-word cap (case-insensitive) */
 				$key_lower = strtolower( $keyword );
 				if (
-					isset( $per_word[ $key_lower ] )
-					&& $per_word[ $key_lower ] >= $data['max']
+					isset( $per_word[ $key_lower ] ) &&
+					$per_word[ $key_lower ] >= $data['max']
 				) {
 					continue;
 				}
