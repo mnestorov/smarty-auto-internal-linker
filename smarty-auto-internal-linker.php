@@ -228,16 +228,23 @@ add_action( 'wp_enqueue_scripts', 'smarty_aul_enqueue_assets' );
 
 if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 	/**
-	 * Inserts automatic internal links into post content (case-insensitive),
-	 * but never links a post to itself.
+	 * Rewrites the post HTML, replacing the *first occurrences* of every
+	 * registered keyword with an internal link (case-insensitive).
 	 *
-	 * @since 1.0.0
-	 * @param string $content Original HTML.
-	 * @return string Modified HTML with links.
+	 * Safeguards:
+	 * • Never inserts a link that points to the current post (self-link).  
+	 * • Respects the per-keyword “max links per post” limit.  
+	 * • Skips headings, blockquotes and existing <a> elements.  
+	 * • Guards against detached DOM nodes (prevents replaceChild() fatal).  
+	 *
+	 * @since 1.2.3
+	 *
+	 * @param string $content Original post/content HTML.
+	 * @return string Modified HTML.
 	 */
 	function smarty_aul_filter_content( $content ) {
 
-		/* Run only on the front end of singular posts/pages */
+		/* Front end, single post/page only */
 		if ( is_admin() || ! is_singular() ) {
 			return $content;
 		}
@@ -247,7 +254,7 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 			return $content;
 		}
 
-		/* ---------- Exclude self-links ---------- */
+		/* ---------- Exclude keywords that point to this very post ---------- */
 		$current_abs = trailingslashit(
 			strtolower( untrailingslashit( get_permalink() ) )
 		);
@@ -255,7 +262,6 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 			strtolower( untrailingslashit( wp_make_link_relative( $current_abs ) ) )
 		);
 
-		/* Remove any keyword whose target URL == this post */
 		foreach ( $dictionary as $kw => $meta ) {
 			$target_abs = trailingslashit(
 				strtolower( untrailingslashit( $meta['url'] ) )
@@ -269,11 +275,11 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 			}
 		}
 
-		if ( empty( $dictionary ) ) {      // after filtering
+		if ( empty( $dictionary ) ) {
 			return $content;
 		}
 
-		/* ---------- DOM parsing & linking ---------- */
+		/* ---------- Parse DOM ---------- */
 		libxml_use_internal_errors( true );
 		$dom = new DOMDocument();
 		$dom->loadHTML(
@@ -284,25 +290,29 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 		$xpath      = new DOMXPath( $dom );
 		$text_nodes = $xpath->query( '//text()' );
 
-		$links_added = 0;
-		$per_word    = [];                                   // counts per keyword (lower-case)
-		$skip_tags   = [ 'a', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6' ];
+		$per_word  = [];                                    // per-keyword link counter
+		$skip_tags = [ 'a', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'th', 'td' ];
 
 		foreach ( $text_nodes as $text_node ) {
+
+			/* Skip if inside disallowed ancestor */
 			if ( smarty_aul_has_disallowed_ancestor( $text_node, $skip_tags ) ) {
 				continue;
 			}
 
 			$node_content = $text_node->nodeValue;
 
-			foreach ( $dictionary as $keyword => $data ) {
-				/* Global cap reached? */
-				if ( $links_added >= SMARTY_AUL_MAX_LINKS_PER_POST ) {
-					break 2;
-				}
+			// DEBUG
+			if ( strpos( strtolower( $node_content ), 'етериум' ) !== false ) {
+				error_log( 'DEBUG AUL: ethereum appears in node: ' . $node_content );
+			}
 
-				/* Per-word cap (case-insensitive) */
+			/* loop through every keyword */
+			foreach ( $dictionary as $keyword => $data ) {
+
 				$key_lower = strtolower( $keyword );
+
+				/* respect per-keyword cap */
 				if (
 					isset( $per_word[ $key_lower ] ) &&
 					$per_word[ $key_lower ] >= $data['max']
@@ -310,42 +320,48 @@ if ( ! function_exists( 'smarty_aul_filter_content' ) ) {
 					continue;
 				}
 
-				/* Case-insensitive, Unicode-safe regex */
+				/* case-insensitive, unicode-safe */
 				$regex = '/\b(' . preg_quote( $keyword, '/' ) . ')\b/ui';
 
-				if ( preg_match( $regex, $node_content ) ) {
-
-					/* Split once, keep the matched word ($parts[1]) */
-					$parts = preg_split(
-						$regex,
-						$node_content,
-						2,
-						PREG_SPLIT_DELIM_CAPTURE
-					);
-
-					if ( 3 === count( $parts ) ) {
-						$before = $dom->createTextNode( $parts[0] );
-						$after  = $dom->createTextNode( $parts[2] );
-
-						/* Use the encountered form (NFT / nft / Nft …) */
-						$anchor = $dom->createElement( 'a', $parts[1] );
-						$anchor->setAttribute( 'href', esc_url_raw( $data['url'] ) );
-						$anchor->setAttribute( 'title', $keyword );
-						$anchor->setAttribute( 'class', 'smarty-aul-link' );
-						if ( 'nofollow' === $data['rel'] ) {
-							$anchor->setAttribute( 'rel', 'nofollow' );
-						}
-
-						$parent = $text_node->parentNode;
-						$parent->replaceChild( $after, $text_node );
-						$parent->insertBefore( $anchor, $after );
-						$parent->insertBefore( $before, $anchor );
-
-						$links_added++;
-						$per_word[ $key_lower ] = ( $per_word[ $key_lower ] ?? 0 ) + 1;
-						break;   // next text node
-					}
+				if ( ! preg_match( $regex, $node_content ) ) {
+					continue;
 				}
+
+				/* Split once – keep matched text as $parts[1] */
+				$parts = preg_split(
+					$regex,
+					$node_content,
+					2,
+					PREG_SPLIT_DELIM_CAPTURE
+				);
+
+				if ( 3 !== count( $parts ) ) {
+					continue;
+				}
+
+				$before = $dom->createTextNode( $parts[0] );
+				$after  = $dom->createTextNode( $parts[2] );
+
+				$anchor = $dom->createElement( 'a', $parts[1] ); // preserve original casing
+				$anchor->setAttribute( 'href',  esc_url_raw( $data['url'] ) );
+				$anchor->setAttribute( 'title', $keyword );
+				$anchor->setAttribute( 'class', 'smarty-aul-link' );
+				if ( 'nofollow' === $data['rel'] ) {
+					$anchor->setAttribute( 'rel', 'nofollow' );
+				}
+
+				/* Guard: make sure parent exists (excerpt ↔ detached nodes) */
+				$parent = $text_node->parentNode;
+				if ( ! $parent ) {
+					continue;
+				}
+
+				$parent->replaceChild( $after, $text_node );
+				$parent->insertBefore( $anchor, $after );
+				$parent->insertBefore( $before, $anchor );
+
+				$per_word[ $key_lower ] = ( $per_word[ $key_lower ] ?? 0 ) + 1;
+				/* do NOT break out; continue scanning same text node for other keywords */
 			}
 		}
 
